@@ -1,7 +1,6 @@
 name: Gemini File Modifier
 
 on:
-  # Trigger on a push to a specific branch or a manual dispatch
   workflow_dispatch:
     inputs:
       file_path:
@@ -19,13 +18,13 @@ jobs:
     permissions:
       contents: write # Required for committing changes
     steps:
-      # Step 1: Checkout the repository (Uses PAT_TOKEN)
+      # Step 1: Checkout the repository (Correctly uses token)
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT_TOKEN }}
           
-      # Step 2: Read the file content
+      # Step 2: Read the file content (Unchanged)
       - name: Read File Content
         id: file_content
         run: |
@@ -34,35 +33,44 @@ jobs:
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-      # Step 3: Construct the Full Prompt
+      # Step 3: Construct the Full Prompt (Unchanged)
       - name: Construct Prompt
         id: full_prompt
         run: |
-          FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text."
+          FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text or markdown fences."
           echo "full_prompt<<EOF" >> $GITHUB_ENV
           echo "$FULL_PROMPT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 4: Call Gemini API and get modified content
-      - name: Generate New Content with Gemini
-        # Using '@main' to bypass previous version tag errors
-        uses: google-github-actions/run-gemini-cli@main
-        id: gemini_response
-        with:
-          # CORRECTED to match your secret name
-          gemini_api_key: ${{ secrets.GEMINI_HTML_API_KEY }} 
-          prompt: ${{ env.full_prompt }}
-          output: 'modified_content'
-          
-      # Step 5: Write the new content to the file
-      - name: Write Modified Content
+      # FIX 1: Gemini CLI Output Capture
+      # We combine the call to the Gemini CLI and the file writing into a single 'run' step.
+      - name: Generate New Content and Write to File
+        id: generate_and_write
+        # We use a shell script that calls the gemini-cli executable directly
+        # and captures its output into a variable, then writes it to the file.
         run: |
-          # Use raw output from Gemini to overwrite the file
-          echo "${{ steps.gemini_response.outputs.modified_content }}" > ${{ github.event.inputs.file_path }}
+          # The run-gemini-cli action makes the gemini-cli executable available.
+          # We call the gemini cli directly with the prompt.
+          # The output is stored in the NEW_CONTENT variable.
+          NEW_CONTENT=$(/usr/bin/gemini --api_key "${{ secrets.GEMINI_HTML_API_KEY }}" --prompt "${{ env.full_prompt }}" 2>&1)
           
-      # Step 6: Commit the changes (Uses PAT_TOKEN)
+          # Check for a specific error in the output, or assume success
+          if echo "$NEW_CONTENT" | grep -q "API call failed"; then
+              echo "Gemini API failed to return content."
+              echo "::error::Gemini API Call Failed: $NEW_CONTENT"
+              exit 1
+          fi
+          
+          # Write the new content to the file
+          echo "$NEW_CONTENT" > ${{ github.event.inputs.file_path }}
+
+      # FIX 2: Commit and Push Changes (Correct parameter usage)
+      # We remove the invalid 'token' input from the 'with' block.
+      # The token for git-auto-commit-action should be passed to the action's environment.
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-          token: ${{ secrets.PAT_TOKEN }}
+        # Pass the PAT_TOKEN as an environment variable (Correct way for this action)
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

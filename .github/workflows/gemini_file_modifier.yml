@@ -23,14 +23,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # Uses the PAT_TOKEN for read/write access (Requires 'repo' scope)
           token: ${{ secrets.PAT_TOKEN }}
           
       # Step 2: Read the file content and set as environment variable
       - name: Read File Content
         id: file_content
         run: |
-          # Read file content, escape quotes, and set as multi-line environment variable
           FILE_CONTENT=$(cat ${{ github.event.inputs.file_path }} | sed 's/\"/\\\"/g')
           echo "file_content<<EOF" >> $GITHUB_ENV
           echo "$FILE_CONTENT" >> $GITHUB_ENV
@@ -40,28 +38,28 @@ jobs:
       - name: Construct Prompt
         id: full_prompt
         run: |
-          # The complete prompt includes the instruction and the file content
           FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text or markdown fences."
           echo "full_prompt<<EOF" >> $GITHUB_ENV
           echo "$FULL_PROMPT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 4: Install Gemini CLI
-      # This step ensures the 'gemini' executable is available
+      # Step 4: Install Gemini CLI (REQUIRED STEP!)
+      # This uses the official action to download and install the 'gemini' executable.
       - name: Install Gemini CLI
         uses: google-github-actions/run-gemini-cli@main
 
-      # Step 5: Call Gemini and Write to File (Auth and Shell Fixes applied here)
+      # Step 5: Call Gemini and Write to File
+      # This step uses the installed 'gemini' executable with the correct authentication.
       - name: Generate New Content and Write to File
         id: generate_and_write
         run: |
           PROMPT_FILE="gemini_prompt.txt"
           OUTPUT_FILE="${{ github.event.inputs.file_path }}"
 
-          # CRITICAL FIX: Explicitly export the API key. This ensures the gemini CLI recognizes the AUTH token.
+          # CRITICAL FIX: Explicitly export the API key for the gemini CLI to recognize.
           export GEMINI_API_KEY="${{ secrets.GEMINI_HTML_API_KEY }}"
 
-          # 1. Write the full prompt to a temporary file to avoid shell syntax errors
+          # 1. Write the full prompt to a temporary file
           echo "${{ env.full_prompt }}" > $PROMPT_FILE
           
           echo "Sending prompt to Gemini..."
@@ -85,6 +83,6 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-        # Pass the PAT_TOKEN as GITHUB_TOKEN environment variable (Correct authentication)
+        # Pass the PAT_TOKEN as GITHUB_TOKEN environment variable
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

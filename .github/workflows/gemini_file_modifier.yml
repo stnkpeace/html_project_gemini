@@ -28,6 +28,7 @@ jobs:
       - name: Read File Content
         id: file_content
         run: |
+          # Read file content, escape quotes, and set as multi-line environment variable
           FILE_CONTENT=$(cat ${{ github.event.inputs.file_path }} | sed 's/\"/\\\"/g')
           echo "file_content<<EOF" >> $GITHUB_ENV
           echo "$FILE_CONTENT" >> $GITHUB_ENV
@@ -37,38 +38,40 @@ jobs:
       - name: Construct Prompt
         id: full_prompt
         run: |
+          # The complete prompt includes the instruction and the file content
           FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text or markdown fences."
           echo "full_prompt<<EOF" >> $GITHUB_ENV
           echo "$FULL_PROMPT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 4: Install Gemini CLI (REQUIRED STEP!)
-      - name: Install Gemini CLI
+      # Step 4: Call Gemini (Installation, Auth, and Execution are now combined here)
+      - name: Generate New Content with Gemini
         uses: google-github-actions/run-gemini-cli@main
-
-      # Step 5: Call Gemini and Write to File (Using inline auth)
-      - name: Generate New Content and Write to File
-        id: generate_and_write
+        id: gemini_response
+        with:
+          # The action guarantees the key is used when the prompt is processed.
+          gemini_api_key: ${{ secrets.GEMINI_HTML_API_KEY }} 
+          
+          # The action sends this entire string as the prompt to the model.
+          prompt: ${{ env.full_prompt }}
+          
+          # We use a special output key ('model_output') to capture the response.
+          output: 'model_output'
+      
+      # Step 5: Write the new content to the file
+      - name: Write Modified Content
         run: |
-          PROMPT_FILE="gemini_prompt.txt"
+          NEW_CONTENT="${{ steps.gemini_response.outputs.model_output }}"
           OUTPUT_FILE="${{ github.event.inputs.file_path }}"
 
-          # 1. Write the full prompt to a temporary file
-          echo "${{ env.full_prompt }}" > $PROMPT_FILE
-          
-          echo "Sending prompt to Gemini..."
-          
-          # 2. Execute the gemini CLI using inline assignment for guaranteed authentication
-          NEW_CONTENT=$(GEMINI_API_KEY="${{ secrets.GEMINI_HTML_API_KEY }}" cat $PROMPT_FILE | gemini)
-          
-          # 3. Basic Error Check
+          # Check if the output is empty (which caused the file erasure previously)
           if [[ -z "$NEW_CONTENT" ]]; then
-              echo "Gemini API returned empty content or an error occurred."
-              echo "::error::Gemini API Call Failed or returned empty content. Check previous step logs for potential API errors."
+              echo "Gemini returned empty content. Stopping to prevent file erasure."
+              echo "::error::Gemini model returned empty content. Check the prompt or API status."
               exit 1
           fi
           
-          # 4. Write the new content to the original file
+          # Write the new content to the original file
           echo "Writing new content to $OUTPUT_FILE"
           echo "$NEW_CONTENT" > $OUTPUT_FILE
           

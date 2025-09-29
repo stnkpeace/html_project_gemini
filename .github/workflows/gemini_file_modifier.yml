@@ -19,14 +19,13 @@ jobs:
     permissions:
       contents: write # Required for committing changes
     steps:
-      # Step 1: Checkout the repository
+      # Step 1: Checkout the repository (Uses PAT_TOKEN)
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # 👇 CHANGE 1: Use the placeholder for the PAT Token
           token: ${{ secrets.PAT_TOKEN }}
           
-      # Step 2: Read the file content (REST OF THIS STEP IS FINE)
+      # Step 2: Read the file content
       - name: Read File Content
         id: file_content
         run: |
@@ -35,7 +34,7 @@ jobs:
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-      # Step 3: Construct the Full Prompt (REST OF THIS STEP IS FINE)
+      # Step 3: Construct the Full Prompt
       - name: Construct Prompt
         id: full_prompt
         run: |
@@ -46,28 +45,24 @@ jobs:
 
       # Step 4: Call Gemini API and get modified content
       - name: Generate New Content with Gemini
+        # Using '@main' to bypass previous version tag errors
         uses: google-github-actions/run-gemini-cli@main
         id: gemini_response
         with:
-          # 👇 CHANGE 2: Use the placeholder for the Gemini API Key
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }} 
-          # The model will execute the instruction based on the full prompt
+          # CORRECTED to match your secret name
+          gemini_api_key: ${{ secrets.GEMINI_HTML_API_KEY }} 
           prompt: ${{ env.full_prompt }}
-          # Set a variable for the output (the new file content)
           output: 'modified_content'
           
-      # Step 5: Write the new content to the file (REST OF THIS STEP IS FINE)
+      # Step 5: Write the new content to the file
       - name: Write Modified Content
         run: |
-          # The output from the Gemini CLI is available via the step ID
+          # Use raw output from Gemini to overwrite the file
           echo "${{ steps.gemini_response.outputs.modified_content }}" > ${{ github.event.inputs.file_path }}
           
-      # Step 6: Commit the changes
+      # Step 6: Commit the changes (Uses PAT_TOKEN)
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-          # 👇 CHANGE 3: Use the placeholder for the PAT Token
           token: ${{ secrets.PAT_TOKEN }}
-          
-# NOTE: Ensure you have secrets named PAT_TOKEN and GEMINI_API_KEY set in your repository settings.

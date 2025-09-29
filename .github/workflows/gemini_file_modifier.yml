@@ -1,0 +1,74 @@
+name: Gemini File Modifier
+
+on:
+  # Trigger on a push to a specific branch or a manual dispatch
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: 'Path to the file to modify (e.g., src/data.json)'
+        required: true
+        default: 'README.md'
+      modification_prompt:
+        description: 'The instruction for Gemini (e.g., "Summarize this file into five bullet points.")'
+        required: true
+        default: 'Explain this file in two sentences.'
+
+jobs:
+  modify_and_commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for committing changes
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Use the PAT token for push/write access
+          token: ${{ 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 }}
+          
+      # Step 2: Read the file content
+      - name: Read File Content
+        id: file_content
+        run: |
+          FILE_CONTENT=$(cat ${{ github.event.inputs.file_path }} | sed 's/\"/\\\"/g')
+          echo "file_content<<EOF" >> $GITHUB_ENV
+          echo "$FILE_CONTENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+      # Step 3: Construct the Full Prompt
+      - name: Construct Prompt
+        id: full_prompt
+        run: |
+          FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text."
+          echo "full_prompt<<EOF" >> $GITHUB_ENV
+          echo "$FULL_PROMPT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      # Step 4: Call Gemini API and get modified content
+      # Using a generic action to interact with Gemini
+      - name: Generate New Content with Gemini
+        uses: google-github-actions/run-gemini-cli@v1
+        id: gemini_response
+        with:
+          gemini_api_key: ${{ AIzaSyAhTWOFi2ph6gE2-BcnOOV23khogthgJcM }}
+          # The model will execute the instruction based on the full prompt
+          prompt: ${{ env.full_prompt }}
+          # Set a variable for the output (the new file content)
+          output: 'modified_content'
+          
+      # Step 5: Write the new content to the file
+      - name: Write Modified Content
+        run: |
+          # The output from the Gemini CLI is available via the step ID
+          echo "${{ steps.gemini_response.outputs.modified_content }}" > ${{ github.event.inputs.file_path }}
+          
+      # Step 6: Commit the changes
+      - name: Commit and Push Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
+          # Use the PAT to authorize the commit
+          token: ${{ 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 }}
+          
+# NOTE: Using 'workflow_dispatch' means you must manually trigger this Action 
+# from the 'Actions' tab on GitHub and provide the File Path and Prompt.

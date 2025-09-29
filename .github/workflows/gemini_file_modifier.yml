@@ -1,6 +1,7 @@
 name: Gemini File Modifier
 
 on:
+  # Trigger on a push to a specific branch or a manual dispatch
   workflow_dispatch:
     inputs:
       file_path:
@@ -15,16 +16,18 @@ on:
 jobs:
   modify_and_commit:
     runs-on: ubuntu-latest
+    # Necessary permission to write and push the modified file
     permissions:
-      contents: write # Required for committing changes
+      contents: write 
     steps:
-      # Step 1: Checkout the repository (Correctly uses token)
+      # Step 1: Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          # Uses the PAT_TOKEN for read/write access (Git Auth Fix)
           token: ${{ secrets.PAT_TOKEN }}
           
-      # Step 2: Read the file content (Unchanged)
+      # Step 2: Read the file content
       - name: Read File Content
         id: file_content
         run: |
@@ -33,44 +36,52 @@ jobs:
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-      # Step 3: Construct the Full Prompt (Unchanged)
+      # Step 3: Construct the Full Prompt
       - name: Construct Prompt
         id: full_prompt
         run: |
+          # Instruction to model: ONLY output the content, no extra text
           FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text or markdown fences."
           echo "full_prompt<<EOF" >> $GITHUB_ENV
           echo "$FULL_PROMPT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # FIX 1: Gemini CLI Output Capture
-      # We combine the call to the Gemini CLI and the file writing into a single 'run' step.
+      # Step 4: Call Gemini and Write to File (Refactored for robustness)
+      # We use the action to install the CLI, then execute the CLI directly via shell script
+      - name: Install Gemini CLI
+        uses: google-github-actions/run-gemini-cli@main
+
       - name: Generate New Content and Write to File
         id: generate_and_write
-        # We use a shell script that calls the gemini-cli executable directly
-        # and captures its output into a variable, then writes it to the file.
         run: |
-          # The run-gemini-cli action makes the gemini-cli executable available.
-          # We call the gemini cli directly with the prompt.
-          # The output is stored in the NEW_CONTENT variable.
-          NEW_CONTENT=$(/usr/bin/gemini --api_key "${{ secrets.GEMINI_HTML_API_KEY }}" --prompt "${{ env.full_prompt }}" 2>&1)
+          PROMPT_FILE="gemini_prompt.txt"
+          OUTPUT_FILE="${{ github.event.inputs.file_path }}"
+
+          # 1. Write the full prompt content to a temporary file (Shell Syntax Fix)
+          echo "${{ env.full_prompt }}" > $PROMPT_FILE
           
-          # Check for a specific error in the output, or assume success
+          echo "Sending prompt to Gemini..."
+          
+          # 2. Call the gemini CLI, passing the prompt via pipe (Most reliable method)
+          # We use the correct secret name: GEMINI_HTML_API_KEY
+          NEW_CONTENT=$(cat $PROMPT_FILE | gemini --api_key "${{ secrets.GEMINI_HTML_API_KEY }}" 2>&1)
+          
+          # 3. Basic Error Check
           if echo "$NEW_CONTENT" | grep -q "API call failed"; then
               echo "Gemini API failed to return content."
               echo "::error::Gemini API Call Failed: $NEW_CONTENT"
               exit 1
           fi
           
-          # Write the new content to the file
-          echo "$NEW_CONTENT" > ${{ github.event.inputs.file_path }}
-
-      # FIX 2: Commit and Push Changes (Correct parameter usage)
-      # We remove the invalid 'token' input from the 'with' block.
-      # The token for git-auto-commit-action should be passed to the action's environment.
+          # 4. Write the new content to the original file, overwriting it
+          echo "Writing new content to $OUTPUT_FILE"
+          echo "$NEW_CONTENT" > $OUTPUT_FILE
+          
+      # Step 5: Commit the changes
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-        # Pass the PAT_TOKEN as an environment variable (Correct way for this action)
+        # Correct way to authenticate: passing PAT via environment variable (Parameter Fix)
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

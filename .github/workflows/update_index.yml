@@ -1,23 +1,34 @@
-name: Update HTML via ChatGPT
+name: Update HTML file with ChatGPT
 
 on:
   workflow_dispatch:
     inputs:
+      file_path:
+        description: 'File to modify (e.g. index.html)'
+        required: true
+        default: 'index.html'
       prompt:
         description: 'Modification prompt for ChatGPT'
         required: true
-        default: 'Beautify and fix the header menu order in index.html'
-      file_path:
-        description: 'Path to the file to update'
-        required: true
-        default: 'index.html'
+        default: 'Modify header menu order as Home, Product Range, Contact, About Us, then rest.'
 
 jobs:
   modify-html:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
+
+      - name: Install jq (if needed)
+        run: sudo apt-get install -y jq
+
+      - name: Read file content
+        id: read_file
+        run: |
+          echo "Reading file: ${{ github.event.inputs.file_path }}"
+          content=$(cat "${{ github.event.inputs.file_path }}")
+          # Save content as an output, replacing newlines with \n for JSON
+          echo "::set-output name=file_content::$content"
 
       - name: Call ChatGPT (OpenAI API) with prompt
         id: chatgpt
@@ -29,15 +40,21 @@ jobs:
           FILE_CONTENT=$(cat "${{ github.event.inputs.file_path }}")
           USER_PROMPT="${{ github.event.inputs.prompt }}"
 
-          REQUEST_BODY=$(printf '{
-            "model": "gpt-4o",
-            "messages": [
-              {"role": "system", "content": "You are an expert HTML developer."},
-              {"role": "user", "content": "Modify the following HTML content according to this prompt: %s\n\nHere is the original HTML:\n%s"}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 3000
-          }' "$(echo "$USER_PROMPT" | sed 's/"/\\"/g')" "$(echo "$FILE_CONTENT" | sed 's/"/\\"/g')")
+          REQUEST_BODY=$(jq -n \
+            --arg model "gpt-4o" \
+            --arg system "You are an expert HTML developer." \
+            --arg user "Modify the following HTML content according to this prompt: $USER_PROMPT\n\nHere is the original HTML:\n$FILE_CONTENT" \
+            --argjson temperature 0.7 \
+            --argjson max_tokens 3000 \
+            '{
+              model: $model,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+              ],
+              temperature: $temperature,
+              max_tokens: $max_tokens
+            }')
 
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -70,5 +87,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "${{ github.event.inputs.file_path }}"
-          git commit -m "Updated ${ { github.event.inputs.file_path } } via ChatGPT: ${{ github.event.inputs.prompt }}" || echo "No changes to commit"
+          git commit -m "Updated ${{ github.event.inputs.file_path }} using ChatGPT"
           git push
+        env:
+          # Use your Personal Access Token here to allow pushing back changes
+          # Store this as a secret in your repo settings (e.g. GITHUB_PAT)
+          GITHUB_PAT: ${{ secrets.PAT_TOKEN }}
+      - name: Set up git to use PAT token
+        run: |
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }}.git

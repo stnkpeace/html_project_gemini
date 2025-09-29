@@ -1,62 +1,127 @@
-@ -19,14 +19,13 @@ jobs:
+name: Gemini File Modifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: 'Path to the file to modify (e.g., src/data.json)'
+        required: true
+        default: 'README.md'
+      modification_prompt:
+        description: 'The instruction for Gemini (e.g., "Summarize this file into five bullet points.")'
+        required: true
+        default: 'Explain this file in two sentences.'
+
+jobs:
+  modify_and_commit:
+    runs-on: ubuntu-latest
     permissions:
       contents: write # Required for committing changes
     steps:
-      # Step 1: Checkout the repository
-      # Step 1: Checkout the repository (Uses PAT_TOKEN)
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # 👇 CHANGE 1: Use the placeholder for the PAT Token
-          token: ${{ secrets.PAT_TOKEN }}
-          
-      # Step 2: Read the file content (REST OF THIS STEP IS FINE)
-      # Step 2: Read the file content
+          token: ${{ secrets.PAT_TOKEN }} # Use your PAT for checkout
+
       - name: Read File Content
         id: file_content
         run: |
-@ -35,7 +34,7 @@ jobs:
+          # The sed command escapes double quotes so the content can be safely passed
+          # into a multiline environment variable.
+          FILE_CONTENT=$(cat ${{ github.event.inputs.file_path }} | sed 's/\"/\\\"/g')
+          echo "file_content<<EOF" >> $GITHUB_ENV
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-          
-      # Step 3: Construct the Full Prompt (REST OF THIS STEP IS FINE)
-      # Step 3: Construct the Full Prompt
+
       - name: Construct Prompt
         id: full_prompt
         run: |
-@ -46,28 +45,24 @@ jobs:
+          # Construct the full prompt including the modification instruction and file content.
+          # The "ONLY output..." part is crucial for Gemini to return just the modified file content.
+          FULL_PROMPT="${{ github.event.inputs.modification_prompt }}\n\nFile Content to Modify:\n\`\`\`\n${{ env.file_content }}\n\`\`\`\n\n- ONLY output the complete modified content for the file. DO NOT include any introductory or explanatory text or markdown fences."
+          echo "full_prompt<<EOF" >> $GITHUB_ENV
+          echo "$FULL_PROMPT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      # Step 4: Call Gemini API and get modified content
-      - name: Generate New Content with Gemini
-        # Using '@main' to bypass previous version tag errors
-        uses: google-github-actions/run-gemini-cli@main
-        id: gemini_response
+      # --- Start of Gemini API Call Section (Python Script) ---
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          # 👇 CHANGE 2: Use the placeholder for the Gemini API Key
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }} 
-          # The model will execute the instruction based on the full prompt
-          # CORRECTED to match your secret name
-          gemini_api_key: ${{ secrets.GEMINI_HTML_API_KEY }} 
-          prompt: ${{ env.full_prompt }}
-          # Set a variable for the output (the new file content)
-          output: 'modified_content'
-          
-      # Step 5: Write the new content to the file (REST OF THIS STEP IS FINE)
-      # Step 5: Write the new content to the file
-      - name: Write Modified Content
+          python-version: '3.x' # Use the latest Python 3 version
+
+      - name: Install Google Generative AI Library
         run: |
-          # The output from the Gemini CLI is available via the step ID
-          # Use raw output from Gemini to overwrite the file
-          echo "${{ steps.gemini_response.outputs.modified_content }}" > ${{ github.event.inputs.file_path }}
+          python -m pip install --upgrade pip
+          pip install google-generativeai
+
+      - name: Generate New Content with Gemini (Python Script)
+        id: gemini_generation
+        run: |
+          # This Python script calls the Gemini API directly and prints its response.
+          # The response is then captured into a GITHUB_ENV variable 'GEMINI_CONTENT'.
+          python_script_output=$(python -c "
+import google.generativeai as genai
+import os
+import sys
+
+# Configure Gemini with the API key from environment variable
+genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
+
+# Specify the model to use (gemini-pro is a good general-purpose text model)
+model = genai.GenerativeModel('gemini-pro')
+
+# Get the full prompt constructed in the previous step
+prompt = os.environ.get('FULL_PROMPT')
+
+try:
+    # Make the API call to generate content
+    response = model.generate_content(prompt)
+    
+    # Check if a response was received and contains valid text content
+    if response and response.text:
+        print(response.text) # Print the content to stdout
+    else:
+        # If no content, print an error to stderr and indicate failure
+        print('Error: Gemini returned no text content.', file=sys.stderr)
+        sys.exit(1)
+except Exception as e:
+    # Catch any exceptions during the API call (e.g., network issues, API errors)
+    print(f'Error calling Gemini API: {e}', file=sys.stderr)
+    sys.exit(1)
+          "
+          )
+          # Capture the output of the Python script into a multiline environment variable
+          echo "GEMINI_CONTENT<<EOF" >> $GITHUB_ENV
+          echo "$python_script_output" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        env: # Pass API key and prompt as environment variables to the Python script
+          GEMINI_API_KEY: ${{ secrets.GEMINI_HTML_API_KEY }}
+          FULL_PROMPT: ${{ env.full_prompt }}
+
+      - name: Write Modified Content
+        id: write_content
+        run: |
+          # Retrieve the generated content from the environment variable
+          NEW_CONTENT="${{ env.GEMINI_CONTENT }}"
+          OUTPUT_FILE="${{ github.event.inputs.file_path }}"
+
+          echo "DEBUG: Captured Content Length: ${#NEW_CONTENT}"
+
+          # IMPORTANT: Check if the content is empty. If it is, stop to prevent erasing the file.
+          if [[ -z "$NEW_CONTENT" ]]; then
+              echo "Gemini returned empty content. Stopping to prevent file erasure."
+              echo "::error::Gemini model returned empty content. Check the prompt, API status, or the Python script's output in the logs above."
+              exit 1 # Exit with error code
+          fi
           
-      # Step 6: Commit the changes
-      # Step 6: Commit the changes (Uses PAT_TOKEN)
+          # Write the new content to the specified file
+          echo "$NEW_CONTENT" | tee "$OUTPUT_FILE"
+
+      # --- End of Gemini API Call Section ---
+
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-          # 👇 CHANGE 3: Use the placeholder for the PAT Token
-          token: ${{ secrets.PAT_TOKEN }}
-          
-# NOTE: Ensure you have secrets named PAT_TOKEN and GEMINI_API_KEY set in your repository settings.
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }} # Use your PAT for committing

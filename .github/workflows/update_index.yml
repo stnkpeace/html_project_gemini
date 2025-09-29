@@ -32,7 +32,7 @@ jobs:
         run: |
           echo "Calling ChatGPT to modify the file..."
 
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -d '{
@@ -45,13 +45,25 @@ jobs:
               "max_tokens": 3000
             }')
 
-          # Extract response content
-          MODIFIED_HTML=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+          # Extract HTTP status
+          HTTP_STATUS=$(echo "$RESPONSE" | grep HTTP_STATUS | awk -F ':' '{print $2}' | tr -d ' ')
+          BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS:/d')
 
-          # Validate response
-          if [ -z "$MODIFIED_HTML" ] || [ "$MODIFIED_HTML" == "null" ]; then
-            echo "ChatGPT did not return valid content."
+          echo "Status code: $HTTP_STATUS"
+          echo "Raw response:"
+          echo "$BODY"
+
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "❌ Error from OpenAI API"
             exit 1
+          fi
+
+          # Extract modified HTML
+          MODIFIED_HTML=$(echo "$BODY" | jq -r '.choices[0].message.content')
+
+          if [ -z "$MODIFIED_HTML" ] || [ "$MODIFIED_HTML" == "null" ]; then
+            echo "❌ ChatGPT did not return usable HTML"
+            exit 2
           fi
 
           echo "$MODIFIED_HTML" > "${{ github.event.inputs.file_path }}"

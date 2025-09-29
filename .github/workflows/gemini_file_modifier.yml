@@ -23,10 +23,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # Use the PAT token for push/write access
-          token: ${{ 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 }}
+          # 👇 CHANGE 1: Use the placeholder for the PAT Token
+          token: ${{ secrets.PAT_TOKEN }}
           
-      # Step 2: Read the file content
+      # Step 2: Read the file content (REST OF THIS STEP IS FINE)
       - name: Read File Content
         id: file_content
         run: |
@@ -35,7 +35,7 @@ jobs:
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-      # Step 3: Construct the Full Prompt
+      # Step 3: Construct the Full Prompt (REST OF THIS STEP IS FINE)
       - name: Construct Prompt
         id: full_prompt
         run: |
@@ -45,18 +45,18 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       # Step 4: Call Gemini API and get modified content
-      # Using a generic action to interact with Gemini
       - name: Generate New Content with Gemini
         uses: google-github-actions/run-gemini-cli@v1
         id: gemini_response
         with:
-          gemini_api_key: ${{ AIzaSyAhTWOFi2ph6gE2-BcnOOV23khogthgJcM }}
+          # 👇 CHANGE 2: Use the placeholder for the Gemini API Key
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }} 
           # The model will execute the instruction based on the full prompt
           prompt: ${{ env.full_prompt }}
           # Set a variable for the output (the new file content)
           output: 'modified_content'
           
-      # Step 5: Write the new content to the file
+      # Step 5: Write the new content to the file (REST OF THIS STEP IS FINE)
       - name: Write Modified Content
         run: |
           # The output from the Gemini CLI is available via the step ID
@@ -67,8 +67,7 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-          # Use the PAT to authorize the commit
-          token: ${{ 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 }}
+          # 👇 CHANGE 3: Use the placeholder for the PAT Token
+          token: ${{ secrets.PAT_TOKEN }}
           
-# NOTE: Using 'workflow_dispatch' means you must manually trigger this Action 
-# from the 'Actions' tab on GitHub and provide the File Path and Prompt.
+# NOTE: Ensure you have secrets named PAT_TOKEN and GEMINI_API_KEY set in your repository settings.

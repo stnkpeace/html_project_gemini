@@ -1,0 +1,68 @@
+name: Update HTML via ChatGPT
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: 'Path to the HTML file to update (e.g., index.html)'
+        required: true
+        default: 'index.html'
+      prompt:
+        description: 'Your instruction to ChatGPT (e.g., reorder header menu)'
+        required: true
+
+jobs:
+  update-html:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Read HTML file
+        id: read_file
+        run: |
+          CONTENT=$(cat "${{ github.event.inputs.file_path }}" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+          echo "file_content=$CONTENT" >> $GITHUB_OUTPUT
+
+      - name: Call ChatGPT (OpenAI API) with prompt
+        id: chatgpt
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Calling ChatGPT to modify the file..."
+
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -d '{
+              "model": "gpt-4o",
+              "messages": [
+                {"role": "system", "content": "You are an expert HTML developer."},
+                {"role": "user", "content": "Modify the following HTML content according to this prompt: '${{ github.event.inputs.prompt }}'.\n\nHere is the original HTML:\n${{ steps.read_file.outputs.file_content }}"}
+              ],
+              "temperature": 0.7,
+              "max_tokens": 3000
+            }')
+
+          # Extract response content
+          MODIFIED_HTML=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+
+          # Validate response
+          if [ -z "$MODIFIED_HTML" ] || [ "$MODIFIED_HTML" == "null" ]; then
+            echo "ChatGPT did not return valid content."
+            exit 1
+          fi
+
+          echo "$MODIFIED_HTML" > "${{ github.event.inputs.file_path }}"
+
+      - name: Commit and push updated HTML
+        env:
+          TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add "${{ github.event.inputs.file_path }}"
+          git commit -m "Modified '${{ github.event.inputs.file_path }}' using ChatGPT"
+          git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
+          git push origin HEAD:${{ github.ref_name || 'main' }}

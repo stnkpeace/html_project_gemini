@@ -18,13 +18,12 @@ jobs:
     permissions:
       contents: write # Required for committing changes
     steps:
-      # Step 1: Checkout the repository
+      # ... Steps 1, 2, 3 (Checkout, Read, Construct Prompt) remain the same ...
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT_TOKEN }}
           
-      # Step 2: Read the file content and set as environment variable
       - name: Read File Content
         id: file_content
         run: |
@@ -33,7 +32,6 @@ jobs:
           echo "$FILE_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-      # Step 3: Construct the Full Prompt
       - name: Construct Prompt
         id: full_prompt
         run: |
@@ -42,21 +40,22 @@ jobs:
           echo "$FULL_PROMPT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 4: Call Gemini (Installation, Auth, and Execution are combined)
+      # Step 4: Call Gemini (Use action to install, but get output via ENV)
       - name: Generate New Content with Gemini
         uses: google-github-actions/run-gemini-cli@main
         id: gemini_response
         with:
           gemini_api_key: ${{ secrets.GEMINI_HTML_API_KEY }} 
           prompt: ${{ env.full_prompt }}
-          # Output capture
-          output: 'model_output'
-      
-      # Step 5: Write the new content to the file (FIXED FILE WRITING)
+        # We DO NOT use 'output' here to avoid potential filtering issues.
+        
+      # Step 5: Write the new content to the file (New Capture Logic)
       - name: Write Modified Content
+        id: write_content
         run: |
-          # Use the raw output from the previous step
-          NEW_CONTENT="${{ steps.gemini_response.outputs.model_output }}"
+          # 1. Capture the LAST line of standard output from the previous step.
+          #    This is a reliable way to get simple text output when 'output' fails.
+          NEW_CONTENT=$(echo "${{ steps.gemini_response.outputs.stdout }}" | tail -n 1)
           OUTPUT_FILE="${{ github.event.inputs.file_path }}"
 
           echo "DEBUG: Captured Content Length: ${#NEW_CONTENT}"
@@ -68,7 +67,7 @@ jobs:
               exit 1
           fi
           
-          # Write the new content to the original file using 'tee' for safety
+          # Write the new content to the original file
           echo "$NEW_CONTENT" | tee "$OUTPUT_FILE"
           
       # Step 6: Commit the changes

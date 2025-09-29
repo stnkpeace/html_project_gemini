@@ -1,7 +1,6 @@
 name: Gemini File Modifier
 
 on:
-  # Trigger on a push to a specific branch or a manual dispatch
   workflow_dispatch:
     inputs:
       file_path:
@@ -44,28 +43,23 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       # Step 4: Install Gemini CLI (REQUIRED STEP!)
-      # This uses the official action to download and install the 'gemini' executable.
       - name: Install Gemini CLI
         uses: google-github-actions/run-gemini-cli@main
 
-      # Step 5: Call Gemini and Write to File
-      # This step uses the installed 'gemini' executable with the correct authentication.
+      # Step 5: Call Gemini and Write to File (Using inline auth)
       - name: Generate New Content and Write to File
         id: generate_and_write
         run: |
           PROMPT_FILE="gemini_prompt.txt"
           OUTPUT_FILE="${{ github.event.inputs.file_path }}"
 
-          # CRITICAL FIX: Explicitly export the API key for the gemini CLI to recognize.
-          export GEMINI_API_KEY="${{ secrets.GEMINI_HTML_API_KEY }}"
-
           # 1. Write the full prompt to a temporary file
           echo "${{ env.full_prompt }}" > $PROMPT_FILE
           
           echo "Sending prompt to Gemini..."
           
-          # 2. Execute the gemini CLI, reading the prompt from the file via pipe
-          NEW_CONTENT=$(cat $PROMPT_FILE | gemini)
+          # 2. Execute the gemini CLI using inline assignment for guaranteed authentication
+          NEW_CONTENT=$(GEMINI_API_KEY="${{ secrets.GEMINI_HTML_API_KEY }}" cat $PROMPT_FILE | gemini)
           
           # 3. Basic Error Check
           if [[ -z "$NEW_CONTENT" ]]; then
@@ -83,6 +77,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'Gemini Auto-Update: ${{ github.event.inputs.file_path }} modified'
-        # Pass the PAT_TOKEN as GITHUB_TOKEN environment variable
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

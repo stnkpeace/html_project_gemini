@@ -32,20 +32,33 @@ jobs:
         run: |
           echo "Calling ChatGPT to modify the file..."
 
+          FILE_CONTENT="${{ steps.read_file.outputs.file_content }}"
+          USER_PROMPT="${{ github.event.inputs.prompt }}"
+
+          REQUEST_BODY=$(cat <<EOF
+          {
+            "model": "gpt-4o",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are an expert HTML developer."
+              },
+              {
+                "role": "user",
+                "content": "Modify the following HTML content according to this prompt: ${USER_PROMPT}\n\nHere is the original HTML:\n${FILE_CONTENT}"
+              }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 3000
+          }
+          EOF
+          )
+
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -d '{
-              "model": "gpt-4o",
-              "messages": [
-                {"role": "system", "content": "You are an expert HTML developer."},
-                {"role": "user", "content": "Modify the following HTML content according to this prompt: '${{ github.event.inputs.prompt }}'.\n\nHere is the original HTML:\n${{ steps.read_file.outputs.file_content }}"}
-              ],
-              "temperature": 0.7,
-              "max_tokens": 3000
-            }')
+            -d "$REQUEST_BODY")
 
-          # Extract HTTP status
           HTTP_STATUS=$(echo "$RESPONSE" | grep HTTP_STATUS | awk -F ':' '{print $2}' | tr -d ' ')
           BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS:/d')
 
@@ -58,7 +71,6 @@ jobs:
             exit 1
           fi
 
-          # Extract modified HTML
           MODIFIED_HTML=$(echo "$BODY" | jq -r '.choices[0].message.content')
 
           if [ -z "$MODIFIED_HTML" ] || [ "$MODIFIED_HTML" == "null" ]; then

@@ -23,7 +23,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # Uses the PAT_TOKEN for read/write access (Git Auth Fix)
+          # Uses the PAT_TOKEN for read/write access (Requires 'repo' scope)
           token: ${{ secrets.PAT_TOKEN }}
           
       # Step 2: Read the file content and set as environment variable
@@ -47,19 +47,19 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       # Step 4: Install Gemini CLI
-      # This step makes the 'gemini' executable available for the next step
+      # This step ensures the 'gemini' executable is available
       - name: Install Gemini CLI
         uses: google-github-actions/run-gemini-cli@main
 
-      # Step 5: Call Gemini and Write to File (Robust Shell Method)
+      # Step 5: Call Gemini and Write to File (Auth and Shell Fixes applied here)
       - name: Generate New Content and Write to File
         id: generate_and_write
-        # Pass the API key as an environment variable for the 'gemini' CLI to auto-detect
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_HTML_API_KEY }}
         run: |
           PROMPT_FILE="gemini_prompt.txt"
           OUTPUT_FILE="${{ github.event.inputs.file_path }}"
+
+          # CRITICAL FIX: Explicitly export the API key. This ensures the gemini CLI recognizes the AUTH token.
+          export GEMINI_API_KEY="${{ secrets.GEMINI_HTML_API_KEY }}"
 
           # 1. Write the full prompt to a temporary file to avoid shell syntax errors
           echo "${{ env.full_prompt }}" > $PROMPT_FILE
@@ -67,12 +67,12 @@ jobs:
           echo "Sending prompt to Gemini..."
           
           # 2. Execute the gemini CLI, reading the prompt from the file via pipe
-          NEW_CONTENT=$(cat $PROMPT_FILE | gemini 2>&1)
+          NEW_CONTENT=$(cat $PROMPT_FILE | gemini)
           
           # 3. Basic Error Check
-          if echo "$NEW_CONTENT" | grep -q "API call failed"; then
-              echo "Gemini API failed to return content."
-              echo "::error::Gemini API Call Failed: $NEW_CONTENT"
+          if [[ -z "$NEW_CONTENT" ]]; then
+              echo "Gemini API returned empty content or an error occurred."
+              echo "::error::Gemini API Call Failed or returned empty content. Check previous step logs for potential API errors."
               exit 1
           fi
           
